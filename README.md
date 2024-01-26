@@ -59,6 +59,12 @@ from recombinhunt.core.environment import Environment
 env = Environment("environments/env_nextstrain_2023_03_30") # <- path to the unzipped environment folder
 ```
 
+and the intra-lineage relationships as:
+```python
+from recombinhunt.validation.utils import LineageHierarchy
+lh = LineageHierarchy("validation_data/alias_key.json")
+```
+
 At the core of the package is the *Experiment* class, which analyses a single sequence and detects if the input is a recombination, the contributing 
 lineages and the breakpoint position. 
 To run an Experiment, you need to provide the *Environment* and a target sequence:
@@ -66,7 +72,7 @@ To run an Experiment, you need to provide the *Environment* and a target sequenc
 ```python
 from recombinhunt.core.method import Experiment
 
-experiment = Experiment(environment=env)
+experiment = Experiment(environment=env, lineage_hierarchy=lh)
 
 experiment.set_target(example_seq)  # <- your target sequence
 
@@ -104,6 +110,18 @@ plot_likelihood(result.genome_view, xaxis="changes")
 
 ![alt text](next_XD_plot.png "Plot of likelihood ratio for case XD")
 
+#### Experiment's parameters
+The behavior of RecombinHunt can be modified for all the Experiment instances by overriding the default parameters of the Experiment class. 
+The changes take effect on the next run of the Experiment. 
+```python
+from recombinhunt.core.method import Experiment
+
+ Experiment.MIN_SEARCHABLE_REGION_LENGTH_TO = 3
+ Experiment.MIN_CANDIDATE_REGION_LENGTH = 3
+ Experiment.MIN_L2_ENCLOSED_REGION_LENGTH = 2
+ Experiment.ALT_CANDIDATE_P_VALUE_DIFFERENCE = 1e-05
+ Experiment.ALT_CANDIDATE_MAX_POS_DISTANCE_T = 1
+```
 
 ## Demo
 
