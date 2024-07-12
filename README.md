@@ -2,11 +2,11 @@
 
 This repository contains the material and source code referenced and documented in the following pre-print manuscript:
 
-> [Data-driven recombination detection in viral genomes](https://doi.org/10.1101/2023.06.05.543733),
-> 
+> [Data-driven recombination detection in viral genomes](https://doi.org/10.1038/s41467-024-47464-5),
+>
 > Tommaso Alfonsi, Anna Bernasconi, Matteo Chiara, Stefano Ceri
-> 
-> bioRxiv 2023.06.05.543733; doi: https://doi.org/10.1101/2023.06.05.543733
+>
+> Nature Communications 15, 3313 (2024); doi: https://doi.org/10.1038/s41467-024-47464-5
 
 RecombinHunt (alias for the software contained in this repository) is a Python library implementing a data-driven novel method for identifying contributing lineages and breakpoints in recombinant viral sequences.
 
