@@ -3,150 +3,12 @@ from collections import Counter
 from itertools import zip_longest
 from logging import warning
 from typing import List
-
 import inflect
 import pandas as pd
+from recombinhunt.core.environment import PangoLineageHierarchy
+
 
 infl = inflect.engine()
-
-
-class LineageHierarchy:
-    def __init__(self, alias_key_file_path):
-        with open(alias_key_file_path, "r") as alias_key_file:
-            self.alias_key = json.load(alias_key_file)
-        # remove mappings to ""
-        self.alias_key = {x:y for x,y in self.alias_key.items() if y != ""}
-        #self.invert_alias_key = self.__prepare_invert_mapping()
-
-    # def __prepare_invert_mapping(self) -> dict:
-    #     # remove mappings to lists (recombinant lineage mappings)
-    #     alias_key = {x:y for x,y in self.alias_key.items() if not isinstance(y, list)}
-    #     # invert mapping
-    #     invert_mapping = dict()
-    #     for x, y in alias_key.items():
-    #         mapped_aliases = invert_mapping.get(y, list())
-    #         mapped_aliases.append(x)
-    #         invert_mapping[y] = mapped_aliases
-    #     return invert_mapping
-    #
-    # def aliases_of(self, lineage:str) -> list:
-    #     ris = self.invert_alias_key.get(lineage.upper(), [])
-    #     if not res1:
-    #         res2 = self.alias_key.get(lineage.upper(), [])
-    #         return res2
-
-    def unfold_lineage(self, lineage: str):
-        lineage = lineage.upper()
-        if lineage.startswith("X"):
-            return lineage
-        prefix, sep, postfix = lineage.partition(".")
-        # exception for lineages expressed as AY* (star not preceded by dot)
-        prefix_no_star, star, _ = prefix.partition("*")
-        return self.alias_key.get(prefix_no_star, prefix_no_star) + sep + postfix + star
-
-    def is_sublineage(self, lin1: str, of_lin2: str) -> bool:
-        """
-        Returns True if the first is a child or nephew of the second lineage; False otherwise.
-        Example:
-        X vs X.1 -> False
-        X.1 vs X -> True
-        X.1 vs X.2 -> False
-        X.1 vs X*/X.* -> True
-        X.1 vs X.1*/X.1.* -> False (X.1 matches exactly X.1*/X.1.*  -- see is_same_lineage())
-        :param lin1:
-        :param of_lin2:
-        :return: bool
-        """
-        child_name = self.unfold_lineage(lin1.rstrip(".*"))
-        putative_parent_name = self.unfold_lineage(of_lin2.rstrip(".*"))
-        return putative_parent_name in child_name and (child_name != putative_parent_name)
-
-    def is_same_lineage(self, lin1: str, as_lin2: str) -> bool:
-        """
-        Returns True if the two lineages match exactly; False otherwise.
-        Example:
-        X vs X -> True
-        X vs X.1 -> False
-        X vs X*/X.* -> True
-        X vs X.1*/X.1.* -> False
-        :param lin1:
-        :param as_lin2:
-        :return:
-        """
-        l1 = self.unfold_lineage(lin1.rstrip(".*"))
-        l2 = self.unfold_lineage(as_lin2.rstrip(".*"))
-        return l1 == l2
-
-    def is_superlineage(self, lin1: str, of_lin2: str) -> bool:
-        """
-        Returns True if the first lineage is an ancestor of the second lineage; False otherwise.
-        Example:
-        X vs X -> False
-        X vs X.1 -> True
-        X vs X*/X.* -> False
-        X vs X.1*/X.1.* -> True
-        :param lin1:
-        :param of_lin2:
-        :return:
-        """
-        child_name = self.unfold_lineage(of_lin2.rstrip(".*"))
-        putative_parent_name = self.unfold_lineage(lin1.rstrip(".*"))
-        return putative_parent_name in child_name and (child_name != putative_parent_name)
-
-    def is_totally_different(self, lin1: str, lin2):
-        lin1 = self.unfold_lineage(lin1.rstrip(".*"))
-        lin2 = self.unfold_lineage(lin2.rstrip(".*"))
-        return lin1 != lin2 and not (lin1 in lin2 or lin2 in lin1)
-
-    def hierarchy(self, lin1: str, with_lin2: str):
-        lin1 = self.unfold_lineage(lin1.rstrip(".*"))
-        with_lin2 = self.unfold_lineage(with_lin2.rstrip(".*"))
-        if lin1 == with_lin2:
-            return "equal"
-        elif lin1 in with_lin2:
-            return "super-lineage"
-        elif with_lin2 in lin1:
-            return "sub-lineage"
-        else:
-            return "different"
-
-    def hierarchy_distance(self, lin1: str, with_lin2: str):
-        lin1 = self.unfold_lineage(lin1.rstrip(".*"))
-        with_lin2 = self.unfold_lineage(with_lin2.rstrip(".*"))
-        if lin1 == with_lin2:   # lin 1 == lin 2
-            return 0
-        elif lin1 in with_lin2: # lin 1 is super-lineage of lin 1
-            return 2
-        elif with_lin2 in lin1: # lin 1 is sub-lineage of lin 2
-            return 1
-        else:                   # otherwise
-            return 3
-
-    def is_matching_candidate(self, candidate_lineage: str, true_lineage: str) -> bool:
-        # Notice: this method is equal to is_same_lineage or (is_sublineage and true_lineage[-1] = '*')
-        # It has been rewritten for reasons of efficiency
-        candidate_lineage = self.unfold_lineage(candidate_lineage.rstrip(".*"))
-        true_lineage = self.unfold_lineage(true_lineage.rstrip(".*"))
-        return (
-            candidate_lineage == true_lineage                                                   # == is_same_lineage
-            or (
-                    (true_lineage in candidate_lineage and candidate_lineage != true_lineage)   # == is_sublineage
-                    and true_lineage[-1] == "*"
-            )
-        )
-
-    def filter_same_hierarchy_as_first(self, lineage_list):
-        return [l for l in lineage_list if self.hierarchy_distance(lineage_list[0], l) < 3]
-
-    def filter_same_hierarchy_as(self, lineage_list, as_lineage):
-        return [l for l in lineage_list if self.hierarchy_distance(as_lineage, l) < 3]
-
-    def farthest_ancestor_in_list(self, from_sub_lineage, lineage_list):
-        ancestor = from_sub_lineage
-        for lin in lineage_list:
-            if self.is_superlineage(lin, ancestor):
-                ancestor = lin
-        return ancestor
 
 
 class AssessedContributingLin:
@@ -448,7 +310,7 @@ def compute_75_perc_characterization(lists=None, strings=None) -> list:
     above_threshold = [change for change, counter in change_frequency.items() if counter >= threshold_num]
     return sorted(above_threshold, key=lambda x: int(x.split('_')[0]))
 
-def all_candidates_matching(regions: list, contributing_lineages: list, lh: LineageHierarchy) -> bool:
+def all_candidates_matching(regions: list, contributing_lineages: list, lh: PangoLineageHierarchy) -> bool:
     if len(regions) != len(contributing_lineages):
         return False
     else:
@@ -466,7 +328,7 @@ def all_candidates_matching(regions: list, contributing_lineages: list, lh: Line
         elif any([ev >= 2 for ev in OK_KO_values]):  # super-lineages / different
             return False
 
-def candidates_matching(regions: list, contributing_lineages: list, lh: LineageHierarchy) -> List[bool]:
+def candidates_matching(regions: list, contributing_lineages: list, lh: PangoLineageHierarchy) -> List[bool]:
     OK_KO_values = []
     for r_idx, (gt_lin, reg) in enumerate(zip_longest(contributing_lineages, regions)):
         if reg is None or gt_lin is None:
@@ -484,7 +346,7 @@ def candidates_matching(regions: list, contributing_lineages: list, lh: LineageH
             OK_KO_values.append(min([BC_evaluation, *alt_c_evaluation]))
     return [True if ev <= 1 else False for ev in OK_KO_values]
 
-def rank_gt_in_regions(regions: list, contributing_lineages: list, lh: LineageHierarchy) -> list:
+def rank_gt_in_regions(regions: list, contributing_lineages: list, lh: PangoLineageHierarchy) -> list:
     ranks = []
     for reg, gt_lin in zip_longest(regions, contributing_lineages):
         if gt_lin is None or reg is None:
@@ -513,20 +375,3 @@ def show_batch_sequence_private_mutations(environment, consensus_seq: list, test
         private_mut_series = private_mut_series.apply(sorted_mutations)
         private_mut_series = private_mut_series.apply(filter_private_mutations)
         return pd.DataFrame(private_mut_series)
-
-
-if __name__ == "__main__":
-    lh = LineageHierarchy("../../validation_data/alias_key.json")
-
-    ##### TEST CASES
-    print("\t", "\t".join(["sub", "exact", "matching_sol", "super"]))
-    for l1 in ["x", "x.1", "x.2"]:
-        print(l1, "vs")
-        for l2 in ["x", "x.1", "x.2", "x*", "x.*", "x.1*", "x.1.*"]:
-            print("\t", l2, lh.is_sublineage(l1,l2), lh.is_same_lineage(l1, l2), lh.is_matching_candidate(l1, l2), lh.is_superlineage(l1,l2))
-
-    # for l1,l2 in [("x", "x"), ("x", "x.1"), ("x", "x.2"), ("x", "x*"), ("x", "x.*"), ("x", "x.1*"), ("x", "x.1.*"),
-    #               ("x.1", "x"), ("x.1", "x.1"), ("x.1", "x.2"), ("x.1", "x*"), ("x.1", "x.*"), ("x.1", "x.1*"), ("x.1", "x.1.*"),
-    #               ("x.2", "x"), ("x.2", "x.1"), ("x.2", "x.2"), ("x.2", "x*"), ("x.2", "x.*"), ("x.2", "x.1*"), ("x.2", "x.1.*")]:
-    #     print(l1,"vs", l2, "->", lh.is_sublineage(l1,l2), lh.is_same_lineage(l1, l2), is_matching_candidate(l1, l2))
-

@@ -1,12 +1,13 @@
 import logging
 from pprint import pformat
 
+from recombinhunt.core.environment import PangoLineageHierarchy
 from recombinhunt.core.method import Experiment
 from recombinhunt.validation.utils import *
 
 
 class NotRecombinantMixedSequence:
-    def __init__(self, lineage_hierarchy: LineageHierarchy):
+    def __init__(self, lineage_hierarchy: PangoLineageHierarchy):
         self.lh = lineage_hierarchy
         self.batch_experiment_output = None
         self.experiment = None

@@ -4,44 +4,46 @@ from typing import List, Optional
 from IPython.core.display import display_html
 from tabulate import tabulate
 
+from recombinhunt.core.environment import PangoLineageHierarchy
 from recombinhunt.core.method import Experiment
 from recombinhunt.validation.utils import *
 from recombinhunt.core.graphics import *
+
 
 class CaseAnalysis:
     def __init__(self, experiment: Experiment,
                  lineage: str, number_of_sequences: int, case_number: int, case_group_name: str,
                  gt_candidates: List[str], gt_genomic_breakpoints: tuple,
-                 lineage_hierarchy: LineageHierarchy, acl: AssessedContributingLin):
+                 lineage_hierarchy: PangoLineageHierarchy, acl: AssessedContributingLin):
         self.exp = experiment
         self.gt_lineage = lineage
         self.n_seq = number_of_sequences
         self.lh = lineage_hierarchy
         self.cl = acl
-         
+
         # Description
         self.group_name = case_group_name
         self.case_number = case_number
-        
-        self.gt_genomic_breakpoints = gt_genomic_breakpoints    # breakpoints of GT in genomic coordinates
+
+        self.gt_genomic_breakpoints = gt_genomic_breakpoints  # breakpoints of GT in genomic coordinates
         self.gt_n_breakpoints = None
-        self.gt_genomic_breakpoints_str = None              
-        
-        self.gt_target_breakpoints = None   # 1-based breakpoints of GT in T
-        self.gt_target_breakpoints_str = None   # string version
-        
+        self.gt_genomic_breakpoints_str = None
+
+        self.gt_target_breakpoints = None  # 1-based breakpoints of GT in T
+        self.gt_target_breakpoints_str = None  # string version
+
         self.gt_candidates = gt_candidates
         self.gt_candidates_str = None
-        
+
         self.target_nuc_changes = None
         self.changes_number = None
 
         # Experiment
-        self.best_candidates_str =  None
+        self.best_candidates_str = None
         self.alternative_candidates_str = None
         self.dir_l1 = None
         self.rank_L1_L2 = None
-        self.bc_target_breakpoints_str = None   # 1-based string version of best candidate breakpoints in t
+        self.bc_target_breakpoints_str = None  # 1-based string version of best candidate breakpoints in t
         self.bc_genomic_breakpoints_str = None  # 1-based string version of best candidate genomic breakpoints
         self.OK_KO = None
         self.gap = None
@@ -61,7 +63,7 @@ class CaseAnalysis:
             self.gt_candidates = ' + '.join(self.cl.contributing_to(self.gt_lineage))
 
             # Experiment
-            self.best_candidates_str =  " + ".join(self.exp.genome_view.contributing_lineages())
+            self.best_candidates_str = " + ".join(self.exp.genome_view.contributing_lineages())
 
             alternative_candidates = self.exp.genome_view.list_good_alternative_candidates()
             alternative_candidates = [f'[{", ".join(alt_list)}]' for alt_list in alternative_candidates]
@@ -87,8 +89,8 @@ class CaseAnalysis:
                     [' - '.join([str(x) for x in tup]) for tup in self.gt_genomic_breakpoints])
 
             self.OK_KO = "OK" if all_candidates_matching(self.exp.genome_view.regions,
-                                                                    self.cl.contributing_to(self.gt_lineage),
-                                                                    self.lh) else "KO"
+                                                         self.cl.contributing_to(self.gt_lineage),
+                                                         self.lh) else "KO"
 
             # Gap
             Gap_tup = []
@@ -144,13 +146,13 @@ class CaseAnalysis:
         likelihood_in_bc_max_pos = [region.candidate_likelihood_at_dir_end(c) for c in region.candidates]
         aic_candidate = [region.candidate_aic(c) for c in region.candidates]
         p_val_candidate = [region.candidate_p_value(c) for c in region.candidates]
-        pval_in_threshold = ["*" if p >= Experiment.ALT_CANDIDATE_P_VALUE_DIFFERENCE else "" for p in p_val_candidate]
+        pval_in_threshold = ["*" if p >= self.exp.ALT_CANDIDATE_P_VALUE_DIFFERENCE else "" for p in p_val_candidate]
 
         p_val_candidate[0] = None
         likelihood_in_bc_max_pos[0] = None
         aic_candidate[0] = None
 
-        close_alternative_candidates = region.alternative_candidates_with_max_likelihood_pos_t_distance_below(Experiment.ALT_CANDIDATE_MAX_POS_DISTANCE_T)
+        close_alternative_candidates = region.alternative_candidates_with_max_likelihood_pos_t_distance_below(self.exp.ALT_CANDIDATE_MAX_POS_DISTANCE_T)
         close_max_likelihood_pos = ["*" if c in close_alternative_candidates or c == region.designated else "" for c in
                                     region.candidates]
 
@@ -263,7 +265,7 @@ class CaseAnalysis:
         target_nuc_changes_str = ""
         last_line_length = 0
         for _change in self.target_nuc_changes:
-            temp_str = target_nuc_changes_str + ", " +_change
+            temp_str = target_nuc_changes_str + ", " + _change
             if len(temp_str) - last_line_length > 190:
                 target_nuc_changes_str += ", <br>"
                 last_line_length = len(target_nuc_changes_str)
@@ -288,26 +290,27 @@ class CaseAnalysis:
         else:
             return string_values
 
-def html_tables_side_by_side(*args,titles=cycle(['']),out=sys.stdout):
+
+def html_tables_side_by_side(*args, titles=cycle(['']), out=sys.stdout):
     items = []
-    for df,title in zip(args, chain(titles,cycle(['</br>'])) ):
-        html_str ='<div style="display:inline-block">'
-        html_str+=f'<h2 style="text-align: center;">{title}</h2>'
-        html_str+='<th style="text-align:center"><td style="vertical-align:top">'
-        html_str+=df.to_html()#.replace('table','table style="display:inline-block"')
-        html_str+='</td></th></div>'
+    for df, title in zip(args, chain(titles, cycle(['</br>']))):
+        html_str = '<div style="display:inline-block">'
+        html_str += f'<h2 style="text-align: center;">{title}</h2>'
+        html_str += '<th style="text-align:center"><td style="vertical-align:top">'
+        html_str += df.to_html()  # .replace('table','table style="display:inline-block"')
+        html_str += '</td></th></div>'
         items.append(html_str)
-    html_str='<div style="display:inline-block"><span style="opacity:0;">|||||</span></div>'.join(items) # +spacing between items
-    html_str+='</br>'
-    if out==sys.stdout or out is None:
-        display_html(html_str,raw=True)
+    html_str = '<div style="display:inline-block"><span style="opacity:0;">|||||</span></div>'.join(items)  # +spacing between items
+    html_str += '</br>'
+    if out == sys.stdout or out is None:
+        display_html(html_str, raw=True)
     else:
         print(html_str, file=out)
 
 
 # if __name__ ==  '__main__':
 #     cl = AssessedContributingLin("../validation_data/alias_key.json")
-#     lh = LineageHierarchy("../validation_data/alias_key.json")
+#     lh = PangoLineageHierarchy("../validation_data/alias_key.json")
 #     env = Environment("../environments/env_2023_04_11")
 #
 #     exp = Experiment(env, lh)

@@ -164,14 +164,14 @@ class Region:
         # update pos in t
         t_change_pos_idx_start = 0  # smallest index of a change of t located >= pos_start (if not found is 0) as position of merged_df
         for i in range(self.pos_start, self.num_genome_positions):
-            if self.seq_change[i]:
+            if self.seq_change.iloc[i]:
                 t_change_pos_idx_start = i
                 break
         self.t_pos_start = np.sum(
             self.seq_change[:t_change_pos_idx_start])  # smallest index of change of t >= pos_start as position of t
         self.t_pos_start = Region.convert_pos_to_t(self.pos_start, self.seq_change)
 
-        self.genomic_start = self.merg_pos[new_pos]
+        self.genomic_start = self.merg_pos.iloc[new_pos]
 
     def set_pos_end(self, new_pos):
         self.pos_end = new_pos
@@ -179,16 +179,16 @@ class Region:
         # update pos in t
         t_change_pos_idx_stop = self.num_genome_positions  # smallest index of a change of t located >= pos_end (if not found is num_genome_positions) as position of merged_df
         for j in range(self.pos_end, self.num_genome_positions):
-            if self.seq_change[j]:
+            if self.seq_change.iloc[j]:
                 t_change_pos_idx_stop = j
                 break
         self.t_pos_end = np.sum(
             self.seq_change[:t_change_pos_idx_stop])  # smallest index of change of t >= pos_end as position of t
 
         if new_pos == self.num_genome_positions:
-            self.genomic_end = self.merg_pos[self.num_genome_positions-1] + 1
+            self.genomic_end = self.merg_pos.iloc[self.num_genome_positions-1] + 1
         else:
-            self.genomic_end = self.merg_pos[new_pos]
+            self.genomic_end = self.merg_pos.iloc[new_pos]
 
     # CANDIDATES LIKELIHOOD
     def likelihood_values(self, alternative_candidate=None):
@@ -320,7 +320,7 @@ class Region:
         # update pos in t
         t_change_pos_idx_start = 0  # smallest index of a change of t located >= pos_start (if not found is 0) as position of merged_df
         for i in range(pos_start, len(seq_change)):
-            if seq_change[i]:
+            if seq_change.iloc[i]:
                 t_change_pos_idx_start = i
                 break
         t_pos_start = np.sum(
@@ -484,16 +484,39 @@ class GenomeView:
         }, sort_dicts=False)
 
 
-class Experiment:
-
+class DefaultParams:
+    # defaults
     MIN_SEARCHABLE_REGION_LENGTH_TO = 3
     MIN_CANDIDATE_REGION_LENGTH = 3
     MIN_L2_ENCLOSED_REGION_LENGTH = 2
     ALT_CANDIDATE_P_VALUE_DIFFERENCE = 1e-05
     ALT_CANDIDATE_MAX_POS_DISTANCE_T = 1
 
-    def __init__(self, environment, lineage_hierarchy):
+
+class Experiment:
+
+    def __init__(self, environment, candidates_hierarchy=None,
+                 min_searchable_region_length=DefaultParams.MIN_SEARCHABLE_REGION_LENGTH_TO,
+                 min_candidate_region_length=DefaultParams.MIN_CANDIDATE_REGION_LENGTH,
+                 min_l2_enclosed_region_length=DefaultParams.MIN_L2_ENCLOSED_REGION_LENGTH,
+                 alt_candidate_p_value_difference=DefaultParams.ALT_CANDIDATE_P_VALUE_DIFFERENCE,
+                 alt_candidate_max_pos_distance_t=DefaultParams.ALT_CANDIDATE_MAX_POS_DISTANCE_T):
         self.env = environment
+        if candidates_hierarchy is not None:
+            self.lh = candidates_hierarchy
+            logging.warn("Experiment argument candidates_hierarchy is kept for backward compatibility. You should provide an Environment with built in CandidatesHierarchy instead.")
+        else:
+            self.lh = environment.ch
+
+        self.MIN_SEARCHABLE_REGION_LENGTH_TO = min_searchable_region_length
+        self.MIN_CANDIDATE_REGION_LENGTH = min_candidate_region_length
+        self.MIN_L2_ENCLOSED_REGION_LENGTH = min_l2_enclosed_region_length
+        self.ALT_CANDIDATE_P_VALUE_DIFFERENCE = alt_candidate_p_value_difference
+        self.ALT_CANDIDATE_MAX_POS_DISTANCE_T = alt_candidate_max_pos_distance_t
+
+        self._reset_internal_variables()
+    
+    def _reset_internal_variables(self):
         self.p_merged_df = None
         self.merged_df = None
         self.change_probabilities = None
@@ -504,14 +527,14 @@ class Experiment:
 
         self.L1_dir = None
 
-        self.lh = lineage_hierarchy
-
         self.p_val_partial_models = dict()
         self.best_model_key = None
         self.best_model_label = None
         self.discarded_model = None
 
         self.flags = []
+
+        self.cache = dict()
 
     def __str__(self):
         experiment_output = {
@@ -539,10 +562,10 @@ class Experiment:
         }, sort_dicts=False)
 
     def set_target(self, nuc_changes: list):
-        env = self.env
-        seq_df = env.sequence_nuc_mutations2df(nuc_changes)
-        self.merged_df = env.make_merged_df(seq_df)
-        self.p_merged_df, self.change_probabilities = env.probabilities(seq_df)
+        self._reset_internal_variables()
+        seq_df = self.env.sequence_nuc_mutations2df(nuc_changes)
+        self.merged_df = self.env.make_merged_df(seq_df)
+        self.p_merged_df, self.change_probabilities = self.env.probabilities(seq_df)
 
     def model_1BP(self, L1_reg):
         """
@@ -560,7 +583,7 @@ class Experiment:
             L2_reg = search_L_fixed_direction(self.merged_df, self.p_merged_df, self.change_probabilities,
                                               left_to_right=L2_search_dir == 0,
                                               l_edge_pos_idx=l_edge, r_edge_pos_idx=r_edge,
-                                              min_target_len=Experiment.MIN_CANDIDATE_REGION_LENGTH)
+                                              min_target_len=self.MIN_CANDIDATE_REGION_LENGTH, cache=self.cache)
             gen_1BP.add_region(L2_reg)
         except NoCandidatesFound:
             self.flags.append(Experiment.Flags.Model_1BP_NoL2)
@@ -583,10 +606,10 @@ class Experiment:
 
     def model_2BP(self, L1_reg):
         """
-        Can raise BadOppositeRegion if the length of the oppotiste region is < min(Experiment.MIN_CANDIDATE_REGION_LENGTH
+        Can raise BadOppositeRegion if the length of the oppotiste region is < min(MIN_CANDIDATE_REGION_LENGTH
          , free_region_of_t).
          Can raise SingleCandidateGenome if there is a problem with the enclosed L2 region: no candidates are found
-         for the enclosed L2 region or if it has length < Experiment.MIN_CANDIDATE_REGION_LENGTH.
+         for the enclosed L2 region or if it has length < MIN_CANDIDATE_REGION_LENGTH.
         :param L1_reg:
         :return:
         """
@@ -596,8 +619,8 @@ class Experiment:
         # find opposite region
         l_edge, r_edge = gen_2BP.free_region()
         opposite_region = find_dual_region(self.merged_df, self.p_merged_df, self.change_probabilities, L1_reg,
-                                           l_edge, r_edge)
-        if opposite_region.length_in_t() < min(Experiment.MIN_CANDIDATE_REGION_LENGTH, gen_2BP.len_free_region_of_t()):
+                                           l_edge, r_edge, cache=self.cache)
+        if opposite_region.length_in_t() < min(self.MIN_CANDIDATE_REGION_LENGTH, gen_2BP.len_free_region_of_t()):
             self.flags.append(Experiment.Flags.Model_2BP_Bad_L1_opp)
             raise BadOppositeRegion
         else:
@@ -607,13 +630,13 @@ class Experiment:
         l_edge, r_edge = gen_2BP.free_region()
         try:
             L2_enclosed_reg = search_L(self.merged_df, self.p_merged_df, self.change_probabilities,
-                              l_edge_pos_idx=l_edge, r_edge_pos_idx=r_edge)
+                              l_edge_pos_idx=l_edge, r_edge_pos_idx=r_edge, cache=self.cache)
         except NoCandidatesFound:
             self.flags.append(Experiment.Flags.Model_2BP_NoL2)
             raise SingleCandidateGenome
         else:
-            if L2_enclosed_reg.length_in_t() < Experiment.MIN_L2_ENCLOSED_REGION_LENGTH:
-                if gen_2BP.len_free_region_of_t() < Experiment.MIN_L2_ENCLOSED_REGION_LENGTH:
+            if L2_enclosed_reg.length_in_t() < self.MIN_L2_ENCLOSED_REGION_LENGTH:
+                if gen_2BP.len_free_region_of_t() < self.MIN_L2_ENCLOSED_REGION_LENGTH:
                     self.flags.append(Experiment.Flags.Model_2BP_NotEnoughSpace_ForL2)
                 self.flags.append(Experiment.Flags.Model_2BP_Bad_L2)
                 raise SingleCandidateGenome
@@ -637,16 +660,16 @@ class Experiment:
 
     def run(self, merge_when_L1eqL2=False, save_discarded_model=False):
         # find L1 (can raise NoCandidatesFound if min_target_len is > 0 && cases L1+L2+L1 with breakpoints at edges)
-        L1_reg: Region = search_L(self.merged_df, self.p_merged_df, self.change_probabilities, min_target_len=Experiment.MIN_CANDIDATE_REGION_LENGTH)
+        L1_reg: Region = search_L(self.merged_df, self.p_merged_df, self.change_probabilities, min_target_len=self.MIN_CANDIDATE_REGION_LENGTH, cache=self.cache)
         self.L1_dir = L1_reg.search_dir
 
         single_candidate_genome = GenomeView(self.merged_df)
         single_candidate_genome.add_region(L1_reg)
         try:
-            if single_candidate_genome.len_free_region_of_t() < Experiment.MIN_SEARCHABLE_REGION_LENGTH_TO:
+            if single_candidate_genome.len_free_region_of_t() < self.MIN_SEARCHABLE_REGION_LENGTH_TO:
                 self.flags.append(Experiment.Flags.NotEnoughSpaceAfterL1)
                 raise SingleCandidateGenome
-            elif all(self.merged_df.iloc[:,:-2].loc[single_candidate_genome.free_changes_of_t()].sum(axis=0) < Experiment.MIN_CANDIDATE_REGION_LENGTH):
+            elif all(self.merged_df.iloc[:,:-2].loc[single_candidate_genome.free_changes_of_t()].sum(axis=0) < self.MIN_CANDIDATE_REGION_LENGTH):
                 self.flags.append(Experiment.Flags.NoCandidateWith3TargetMutationsAfterL1)
                 raise SingleCandidateGenome
             else:
@@ -677,9 +700,9 @@ class Experiment:
                     new_reg_r_edge = max(widest_range[1])
                     aic_partial_models = {
                         '1BP': aic_on_range(self.merged_df, self.p_merged_df, self.change_probabilities,
-                                            genome_1BP.regions, new_reg_l_edge, new_reg_r_edge),
+                                            genome_1BP.regions, new_reg_l_edge, new_reg_r_edge, self.cache),
                         '2BP': aic_on_range(self.merged_df, self.p_merged_df, self.change_probabilities,
-                                            genome_2BP.regions, new_reg_l_edge, new_reg_r_edge)
+                                            genome_2BP.regions, new_reg_l_edge, new_reg_r_edge, self.cache)
                     }
 
                     self.p_val_partial_models = {
@@ -709,13 +732,13 @@ class Experiment:
             self.genome_view = single_candidate_genome
 
         # evaluate alternative candidates
-        self.assertion_error_alt_c = update_region_p_values(self.merged_df, self.p_merged_df, self.change_probabilities, self.genome_view.regions)
+        self.assertion_error_alt_c = update_region_p_values(self.merged_df, self.p_merged_df, self.change_probabilities, self.genome_view.regions, self.cache)
         [r.save_alternative_candidates_in_same_branch(self.lh) for r in self.genome_view.regions]
         # candidate max pos is evaluated internally within each region
         for r in self.genome_view.regions:
             r.set_good_alternative_candidates(multiple_lists=(
-                r.alternative_candidates_with_p_value_above(Experiment.ALT_CANDIDATE_P_VALUE_DIFFERENCE),
-                r.alternative_candidates_with_max_likelihood_pos_t_distance_below(Experiment.ALT_CANDIDATE_MAX_POS_DISTANCE_T),
+                r.alternative_candidates_with_p_value_above(self.ALT_CANDIDATE_P_VALUE_DIFFERENCE),
+                r.alternative_candidates_with_max_likelihood_pos_t_distance_below(self.ALT_CANDIDATE_MAX_POS_DISTANCE_T),
                 r.alternative_candidates_in_same_branch()
             ))
 
@@ -751,67 +774,141 @@ def designated_candidates_in_same_hierarchy_branch(gen: GenomeView, lh):
                 for r1,r2 in zip(gen.regions[1:], gen.regions[:-1])])
 
 
-def logp4lin(l, merged_df, p_merged_df, change_probabilities, left_to_right=True):
-    # ln(x) results is MINUS_INF_LIKE for x < TOO_SMALL4LOG_THRESHOLD
-    TOO_SMALL4LOG_THRESHOLD = 0.001
-    MINUS_INF_LIKE = -10
+def logp4all(p_merged_df, change_probabilities, cache=dict()):
+    """
+    Returns the likelihood ratio scores for all the lineages in p_merged_df. 
 
+    The cache may be used to avoid expensive re-computations. 
+    The cache may be used also to speedup the method 'logp4lin'.
+
+    :param p_merged_df:
+    :param change_probabilities:
+    :param cache:
+    :return:
+    """
+    key = ("logp4all", p_merged_df.shape)
+    try:
+        _logp = cache[key]
+    except (KeyError,TypeError):
+        # ratio p_merged_df / change_probabilities
+        c2lp_2darray = p_merged_df.iloc[:,:-2].values
+        cp_2darray = change_probabilities.reshape((-1,1))
+        out = np.ones(c2lp_2darray.shape)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            p_ratio = np.divide(c2lp_2darray, cp_2darray, out=out, where=cp_2darray != 0) # >= 0 / >= 0
+            # when change_probability is 0  -> return 1 instead of nan, but calculus is done anyway so ignore warning "divide"
+            # when c2l probability is 0     -> return 0 but np raises a warning so ignore warning "invalid"
+            # all special cases and coping strategies:
+            # n/0 = inf and raises warnign divide by 0 -> (never happens)
+            # 0/0 = nan and raises warning divide by 0 -> replace with 1, ignore warning "divide"
+            # 0/n = 0   and raises warning invalid value -> keep 0, ignore warning "invalid"
+
+        # logarithm
+        # compute log(x) only for x > TOO_SMALL4LOG_THRESHOLD, else use MINUS_INF_LIKE
+        TOO_SMALL4LOG_THRESHOLD = 0.001
+        MINUS_INF_LIKE = -10
+        _logp = np.where(p_ratio > TOO_SMALL4LOG_THRESHOLD, p_ratio, MINUS_INF_LIKE)
+        _logp = np.log(_logp, out=_logp, where=_logp > 0)
+        cache[key] = _logp
+    return _logp
+
+
+def logp4lin(l, p_merged_df, change_probabilities, cache=dict()):
+    """
+    Returns the likelihood ratio scores for the given lineage. 
+
+    The cache may be used to read the output of logp4all (likelihood ratios for all the candidates) and skip the computation. 
+    It is advisable to not save the computation of likelihood ratios for a single candidate since logp4all already saves the likelihood ratios for all.
+
+    :param l:
+    :param p_merged_df:
+    :param change_probabilities:
+    :param cache:
+    :return:
+    """
+    # ln(x) results is MINUS_INF_LIKE for x < TOO_SMALL4LOG_THRESHOLD
+    key = ("logp4all", p_merged_df.shape)
+    try:
+        logp4l = cache[key][:,p_merged_df.columns.get_loc(l)]
+    except KeyError:
+        TOO_SMALL4LOG_THRESHOLD = 0.001
+        MINUS_INF_LIKE = -10
+
+        c2l1_probabilities = p_merged_df[l].values
+        with np.errstate(divide='ignore', invalid='ignore'):
+            # when change_probability is 0 -> return 1 instead of nan, but calculus is done anyway so ignore divide warning
+            # when c2l1_probability is 0 -> return 0 but np raises a warning so ignore invalid warning
+            p_ratio = np.where(change_probabilities == 0, 1.0, c2l1_probabilities / change_probabilities) # >= 0 / >= 0
+
+        logp4l = np.where(p_ratio > TOO_SMALL4LOG_THRESHOLD, p_ratio, MINUS_INF_LIKE)
+        logp4l = np.log(logp4l, out=logp4l, where=logp4l > 0)
+    return logp4l
+
+
+def clogp4all(merged_df, p_merged_df, change_probabilities, left_to_right=True, cache=dict()):
+    """
+    Returns the cumulative sum of likelihood contributions for all the lineages in merged_df. 
+    For a lineage L, likelihood values contribute positively to the cumulative sum if the mutation is held by the target sequence, 
+    negatively if only by the lineage L, do not contribute at all otherwise.
+
+    Computing the cumulative sum of values is a generally fast operation. 
+    It is advised to avoid caching them to avoid large memory consumption for a small performance advantage.
+    The cache may be used to fetch likelihood ratio scores instead.
+
+
+    :param merged_df:
+    :param p_merged_df:
+    :param change_probabilities:
+    :param left_to_right:
+    :return:
+    """
+    key = ("clogp4all", merged_df.shape, left_to_right)
+    try:
+        result = cache[key]
+    except KeyError: # then compute
+        _logp = logp4all(p_merged_df, change_probabilities, cache)
+        len_changes = merged_df.shape[0]
+        changes_of_target = merged_df['seq_change'].values
+
+        def lin_cumulative_sum(l, l_idx):
+            logp4l = _logp[:,l_idx]
+            # positive_contribs
+            contribs = np.where(changes_of_target, logp4l, np.zeros(len_changes))       # +logp if change of target, +0 otherwise (neutral contrib for changes not in target and lin)
+            # negative contribs
+            changes_of_l = merged_df[l].values
+            contribs = np.where((~changes_of_target & changes_of_l), -logp4l, contribs) # -logp if change of lin but not of target
+            return np.cumsum(contribs[::1 if left_to_right else -1])
+
+        result = np.array([lin_cumulative_sum(lin, lin_idx) for lin_idx, lin in enumerate(merged_df.columns[:-2])]).T
+        cache[key] = result
+    return result
+
+
+def clogp4lin(l, merged_df, logp4l, left_to_right=True):
+    """
+    Returns the cumulative sum of likelihood contributions for the given lineage. 
+    Likelihood values contribute positively to the cumulative sum if the mutation is held by the target sequence, 
+    negatively if only by the given lineage, and do not contribute at all otherwise.
+    :param l:
+    :param merged_df:
+    :param logp4l: the likelihood ratio values for lienage l
+    :param left_to_right:
+    :return:
+    """
     changes_of_target = merged_df['seq_change'].values
-    changes_of_l1 = merged_df[l].values
     len_changes = merged_df.shape[0]
 
-    c2l1_probabilities = p_merged_df[[l]].values.reshape(len_changes)
-    with np.errstate(divide='ignore', invalid='ignore'):
-        # when change_probability is 0 -> return 1 instead of nan, but calculus is done anyway so ignore divide warning
-        # when c2l1_probability is 0 -> return 0 but np raises a warning so ignore invalid warning
-        p_ratio = np.where(change_probabilities == 0, 1.0, c2l1_probabilities / change_probabilities) # >= 0 / >= 0
-
-    logp = np.where(p_ratio > TOO_SMALL4LOG_THRESHOLD, p_ratio, MINUS_INF_LIKE)
-    logp = np.log(logp, out=logp, where=logp > 0)
-
-    cl_values = []
-    cl = 0
-    for i in range(len_changes) if left_to_right else range(len_changes - 1, -1, -1):
-        if changes_of_target[i]:
-            cl += logp[i]
-        elif changes_of_l1[i]:
-            cl -= logp[i]
-        # ... else no change (i.e., += 0)
-        cl_values.append(cl)
-    return np.array(cl_values)
-
-# def new_likelihood(l, p_merged_df, change_probabilities):
-#     # ln(x) results is MINUS_INF_LIKE for x < TOO_SMALL4LOG_THRESHOLD
-#     TOO_SMALL4LOG_THRESHOLD = 0.001
-#     MINUS_INF_LIKE = -10
-#
-#     len_changes = p_merged_df.shape[0]
-#
-#     c2l1_probabilities = p_merged_df[[l]].values.reshape(len_changes)
-#     p_ratio = np.where(change_probabilities == 0.0, 1.0, c2l1_probabilities / change_probabilities) # >= 0 / >= 0
-#
-#     logp = np.where(p_ratio > TOO_SMALL4LOG_THRESHOLD, p_ratio, MINUS_INF_LIKE)
-#     return np.log(logp, out=logp, where=logp > 0)
-#
-# def accumulate(l, merged_df, likelihood, left_to_right = False):
-#     changes_of_target = merged_df['seq_change'].values
-#     changes_of_l1 = merged_df[l].values
-#     len_changes = merged_df.shape[0]
-#
-#     cl_values = []
-#     cl = 0
-#     for i in range(len_changes) if left_to_right else range(len_changes - 1, -1, -1):
-#         if changes_of_target[i]:
-#             cl += likelihood[i]
-#         elif changes_of_l1[i]:
-#             cl -= likelihood[i]
-#         # ... else no change (i.e., += 0)
-#         cl_values.append(cl)
-#     return np.array(cl_values)
+    # positive_contribs
+    contribs = np.where(changes_of_target, logp4l, np.zeros(len_changes))       # +logp if change of target, +0 otherwise (neutral contrib for changes not in target and lin)
+    # negative contribs
+    changes_of_l = merged_df[l].values
+    contribs = np.where((~changes_of_target & changes_of_l), -logp4l, contribs) # -logp if change of lin but not of target
+    return np.cumsum(contribs[::1 if left_to_right else -1])
 
 
 def top_candidates(merged_df, p_merged_df, change_probabilities, l_edge_pos_idx=None, r_edge_pos_idx=None,
-                   left_to_right=True, force_include_lineage=None, min_target_len=0
+                   left_to_right=True, force_include_lineage=None, min_target_len=0,
+                   cache = dict()
                    ) -> Tuple[List[str], np.array, List[int], np.array]:
     """
     Computes and compares the likelihood of all the possible candidates in the region defined between l_edge_pos_idx and
@@ -828,14 +925,20 @@ def top_candidates(merged_df, p_merged_df, change_probabilities, l_edge_pos_idx=
     :param left_to_right:
     :param force_include_lineage:
     :param min_target_len: minimum number of target changes that acceptable candidates must cover
+    :param cache: (optional) a dictionary for memoization
     :return:
     """
-    # cumulative likelihood for all lineages
-    all_lineages = merged_df.columns[:-2].to_list()
-    all_likelihoods = []
-    for l in all_lineages:
-        all_likelihoods.append(logp4lin(l, merged_df, p_merged_df, change_probabilities, left_to_right=left_to_right)[::1 if left_to_right else -1])
-    all_likelihoods = np.array(all_likelihoods).T
+    ## cumulative likelihood for all lineages
+    # search in cache
+    key = ("clogp4all", merged_df.shape, left_to_right)
+    try:
+        all_likelihoods = cache[key]
+    except KeyError:
+        # or compute
+        all_likelihoods = clogp4all(merged_df, p_merged_df, change_probabilities, left_to_right, cache=cache)
+        if not left_to_right:
+            all_likelihoods = np.flip(all_likelihoods, axis=0)
+        cache[key] = all_likelihoods
 
     # limit search
     all_likelihoods_window = all_likelihoods[l_edge_pos_idx:r_edge_pos_idx]
@@ -896,7 +999,7 @@ def top_candidates(merged_df, p_merged_df, change_probabilities, l_edge_pos_idx=
     return names_top_lin, max_top_lin, pos_max_top_lin, all_likelihoods[:,idx_top_lin]
 
 
-def search_L(merged_df, p_merged_df, change_probabilities, l_edge_pos_idx=None, r_edge_pos_idx=None, min_target_len=0):
+def search_L(merged_df, p_merged_df, change_probabilities, l_edge_pos_idx=None, r_edge_pos_idx=None, min_target_len=0, cache=dict()):
     """
     Search any likely candidate for the region defined in the range <l_edge_pos_idx, r_edge_pos_idx> having maximum
     likelihood such that it coverts at least min_target_len changes of positions of the target genome.
@@ -909,16 +1012,17 @@ def search_L(merged_df, p_merged_df, change_probabilities, l_edge_pos_idx=None, 
     :param l_edge_pos_idx:
     :param r_edge_pos_idx:
     :param min_target_len:
+    :param cache: (optional) a dictionary for memoization
     :return:
     """
     try:
         candidates2dx = top_candidates(merged_df, p_merged_df, change_probabilities, l_edge_pos_idx=l_edge_pos_idx,
-                                       r_edge_pos_idx=r_edge_pos_idx, left_to_right=True, min_target_len=min_target_len)
+                                       r_edge_pos_idx=r_edge_pos_idx, left_to_right=True, min_target_len=min_target_len, cache=cache)
     except NoCandidatesFound:
         candidates2dx = None
     try:
         candidates2sx = top_candidates(merged_df, p_merged_df, change_probabilities, l_edge_pos_idx=l_edge_pos_idx,
-                                       r_edge_pos_idx=r_edge_pos_idx, left_to_right=False, min_target_len=min_target_len)
+                                       r_edge_pos_idx=r_edge_pos_idx, left_to_right=False, min_target_len=min_target_len, cache=cache)
     except NoCandidatesFound:
         candidates2sx = None
     if candidates2dx and candidates2sx:
@@ -935,7 +1039,7 @@ def search_L(merged_df, p_merged_df, change_probabilities, l_edge_pos_idx=None, 
 
 
 def search_L_fixed_direction(merged_df, p_merged_df, change_probabilities, left_to_right,
-                             l_edge_pos_idx=None, r_edge_pos_idx=None, min_target_len=0):
+                             l_edge_pos_idx=None, r_edge_pos_idx=None, min_target_len=0, cache=dict()):
     """
     Like search_L it returns any good candidate lineage satisfying the requirement min_target_len in the given
     positional range, but the search direction is fixed.
@@ -947,17 +1051,18 @@ def search_L_fixed_direction(merged_df, p_merged_df, change_probabilities, left_
     :param l_edge_pos_idx:
     :param r_edge_pos_idx:
     :param min_target_len:
+    :param cache: (optional) a dictionary for memoization
     :return:
     """
 
     candidates = top_candidates(merged_df, p_merged_df, change_probabilities,
                                 l_edge_pos_idx=l_edge_pos_idx,r_edge_pos_idx=r_edge_pos_idx,
-                                left_to_right=left_to_right, min_target_len=min_target_len)
+                                left_to_right=left_to_right, min_target_len=min_target_len, cache=cache)
     # don't catch exception
     return Region.from_candidate_list(candidates, left_to_right == 0, merged_df, l_edge_pos_idx, r_edge_pos_idx)
 
 
-def find_dual_region(merged_df, p_merged_df, change_probabilities, L1_reg, l_edge, r_edge):
+def find_dual_region(merged_df, p_merged_df, change_probabilities, L1_reg, l_edge, r_edge, cache=dict()):
     """
     This function is a wrapper around compute_region_for_candidate that decides the direction in which to search the
     candidate of L1_reg and once the new region is found, L1_reg is set as master_region for it.
@@ -973,14 +1078,14 @@ def find_dual_region(merged_df, p_merged_df, change_probabilities, L1_reg, l_edg
     new_direction = abs(1 - L1_reg.search_dir)
 
     new_region = compute_region_for_candidate(L1_reg.designated, merged_df, p_merged_df, change_probabilities,
-                                              l_edge, r_edge, new_direction == 0)
+                                              l_edge, r_edge, new_direction == 0, cache=cache)
     new_region.set_master_region(L1_reg)
     return new_region
 
 
 def compute_region_for_candidate(l, merged_df, p_merged_df, change_probabilities,
                                  l_edge_pos_idx=None, r_edge_pos_idx=None,
-                                 left_to_right=True):
+                                 left_to_right=True, cache=dict()):
     """
     This function computes a Region for the given candidate within the given positional range. The returned region may
     also 0 length if the candidate is not suited for the region/target genome.
@@ -993,7 +1098,7 @@ def compute_region_for_candidate(l, merged_df, p_merged_df, change_probabilities
     :param left_to_right:
     :return:
     """
-    cl = logp4lin(l, merged_df, p_merged_df, change_probabilities, left_to_right)
+    cl = clogp4lin(l, merged_df, logp4lin(l, p_merged_df, change_probabilities, cache), left_to_right)
     cl = cl if left_to_right else cl[::-1]
 
     cl_window = cl[l_edge_pos_idx:r_edge_pos_idx]
@@ -1329,7 +1434,7 @@ def aik_p_values(merged_df, p_merged_df, change_probabilities, regions: list) ->
 #     return p_values
 
 
-def update_region_p_values(merged_df, p_merged_df, change_probabilities, regions: list):
+def update_region_p_values(merged_df, p_merged_df, change_probabilities, regions: list, cache=dict()):
     """
     For every region, computes the likelihood, aic and p-value of every candidate and saves them inside the attribute
     Region.candidates_similarity_stats
@@ -1356,7 +1461,8 @@ def update_region_p_values(merged_df, p_merged_df, change_probabilities, regions
         likelihood_candidates = dict()
         aic_candidates = []
         for c in dict.fromkeys(all_candidates):
-            c_log = logp4lin(c, merged_df[L1_changes], p_merged_df[L1_changes], change_probabilities[L1_changes])[-1]
+            logp4l = logp4lin(c, p_merged_df, change_probabilities, cache)[L1_changes]
+            c_log = clogp4lin(c, merged_df[L1_changes], logp4l)[-1]
             likelihood_candidates[c] = c_log
             aic = 2 * n_parameters - 2 * c_log
             aic_candidates.append((c, aic))
@@ -1393,7 +1499,7 @@ def update_region_p_values(merged_df, p_merged_df, change_probabilities, regions
         likelihood_candidates = dict()
         aic_candidates = []
         for c in dict.fromkeys(L2.candidates):
-            c_log = logp4lin(c, merged_df[L2_changes], p_merged_df[L2_changes], change_probabilities[L2_changes])[-1]
+            c_log = clogp4lin(c, merged_df[L2_changes], logp4lin(c, p_merged_df[L2_changes], change_probabilities[L2_changes], cache))[-1]
             likelihood_candidates[c] = c_log
             aic = 2 * n_parameters - 2 * c_log
             aic_candidates.append((c, aic))
@@ -1430,7 +1536,7 @@ def update_region_p_values(merged_df, p_merged_df, change_probabilities, regions
             likelihood_candidates = dict()
             aic_candidates = []
             for c in dict.fromkeys(r.candidates):
-                c_log = logp4lin(c, merged_df[r_changes], p_merged_df[r_changes], change_probabilities[r_changes])[-1]
+                c_log = clogp4lin(c, merged_df[r_changes], logp4lin(c, p_merged_df[r_changes], change_probabilities[r_changes], cache))[-1]
                 likelihood_candidates[c] = c_log
                 aic = 2 * n_parameters - 2 * c_log
                 aic_candidates.append((c, aic))
@@ -1472,7 +1578,7 @@ def mask_changes_of_candidates_or_target(merged_df, region: Region) -> np.array:
     return candidates_change_mask
 
 
-def aic_on_range(merged_df, p_merged_df, change_probabilities, regions: list, l_edge_pos_idx, r_edge_pos_idx):
+def aic_on_range(merged_df, p_merged_df, change_probabilities, regions: list, l_edge_pos_idx, r_edge_pos_idx, cache=dict()):
     """
     Returns the AIC for the positional range <l_edge_pos_idx, r_edge_pos_idx>. Only the regions that are partially or
     completely overlappin with the given range are used and only for the portion included in the range.
@@ -1507,8 +1613,8 @@ def aic_on_range(merged_df, p_merged_df, change_probabilities, regions: list, l_
         ss = max(s, l_edge_pos_idx)
         ee = min(e, r_edge_pos_idx)
         # compute logp4lin for candidate c only on changes of t and c, withing the region boundaries
-        c_region_clog = logp4lin(c, merged_df[ss:ee], p_merged_df[ss:ee],
-                                 change_probabilities[ss:ee])[-1]
+        logp4l = logp4lin(c, p_merged_df, change_probabilities, cache)[ss:ee]
+        c_region_clog = clogp4lin(c, merged_df[ss:ee], logp4l)[-1]
         # left_to_right / right_to_left we don't care
         c_log_candidate_regions.append(c_region_clog)
     # pp({

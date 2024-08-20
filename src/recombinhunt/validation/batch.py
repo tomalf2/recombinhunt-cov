@@ -9,7 +9,7 @@ import numpy as np
 from plotly.subplots import make_subplots
 from plotly import graph_objects as go
 from tqdm import tqdm
-from recombinhunt.core.environment import Environment
+from recombinhunt.core.environment import Environment, PangoLineageHierarchy
 from recombinhunt.core.method import Experiment
 from recombinhunt.validation.utils import *
 
@@ -17,7 +17,7 @@ from recombinhunt.validation.utils import *
 class GroundTruth:
     P_VAL_ACCEPT_THRESHOLD = 1e-05
 
-    def __init__(self, lineage_hierarchy: LineageHierarchy,
+    def __init__(self, lineage_hierarchy: PangoLineageHierarchy,
                  environment, test_sequence_dataset=None, max_samples=None, shuffle_test_dataset=False,
                  experiment_output_csv=None):
         self.lh = lineage_hierarchy
@@ -134,7 +134,7 @@ class GroundTruth:
 
 
 class RecombinantGroundTruth(GroundTruth):
-    def __init__(self, lineage, gt_contributing_lineages, gt_breakpoint_ranges, lh: LineageHierarchy,
+    def __init__(self, lineage, gt_contributing_lineages, gt_breakpoint_ranges, lh: PangoLineageHierarchy,
                  environment, test_sequence_dataset=None, max_samples=None, shuffle_test_dataset=False,
                  experiment_output_csv=None):
         self.lineage = lineage
@@ -471,7 +471,7 @@ class RecombinantGroundTruth(GroundTruth):
 
 
 class NotRecombinantMixedSequence(GroundTruth):
-    def __init__(self, lineage_hierarchy: LineageHierarchy,
+    def __init__(self, lineage_hierarchy: PangoLineageHierarchy,
                  environment, test_sequence_dataset=None, max_samples=None, shuffle_test_dataset=False,
                  experiment_output_csv=None):
         super().__init__(lineage_hierarchy, environment, test_sequence_dataset, max_samples, shuffle_test_dataset,
