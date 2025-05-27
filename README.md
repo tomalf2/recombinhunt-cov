@@ -1,4 +1,4 @@
-# RecombinHunt-CoV v7.0.0
+# RecombinHunt-CoV
 
 This repository is an updated software version of the material and source code referenced and documented in the following manuscript:
 
@@ -70,8 +70,10 @@ To run an Experiment, you need to provide the *Environment* and a target sequenc
 ```python
 from recombinhunt.core.method import Experiment
 
+target = ['22029_22034', '28248_28253', '28271_28271', '22204_.|GAGCCAGAA', '210_G|T', '241_C|T', '1321_A|C', '3037_C|T', '4181_G|T', '4890_C|T', '6402_C|T', '7124_C|T', '7851_C|T', '8723_A|G', '8986_C|T', '9053_G|T', '10029_C|T', '11201_A|G', '11332_A|G', '14407_C|T', '14408_C|T', '15264_T|C', '15451_G|A', '16466_C|T', '18366_A|G', '19220_C|T', '20032_C|T', '21618_C|G', '21641_G|T', '21846_C|T', '21987_G|A', '22578_G|A', '22673_T|C', '22674_C|T', '22679_T|C', '22686_C|T', '22813_G|T', '22882_T|G', '22898_G|A', '22992_G|A', '22995_C|A', '23013_A|C', '23040_A|G', '23048_G|A', '23055_A|G', '23063_A|T', '23075_T|C', '23202_C|A', '23403_A|G', '23525_C|T', '23599_T|G', '23604_C|A', '23854_C|A', '23948_G|T', '24130_C|A', '24424_A|T', '24469_T|A', '24503_C|T', '25000_C|T', '25667_C|T', '25855_G|T', '26767_T|C', '27638_T|C', '27752_C|T', '27874_C|T', '28461_A|G', '28881_G|T', '28916_G|T', '29402_G|T', '29540_G|A', '29645_G|T', '29742_G|T'] # = list of mutations in the target sequence
+
 experiment = Experiment(environment=env)
-experiment.set_target(example_seq)  # <- your target sequence
+experiment.set_target(target)
 result = experiment.run()
 ```
 

@@ -287,6 +287,111 @@ class Environment:
                            f"{self.data_dir_path}")
         return self.x_characterization.index[self.x_characterization[x_lineage_name.upper()]].values.tolist()
 
+    ## VALIDITY
+    def assert_valid(self):
+        """
+        Verifies that tables 'lc_df', 'change2lineage_probability' and 'change2probability' contain the right number and type of columns. 
+        Verifies that all values are defined.
+        Verifies that mutations in table 'lc_df' are contained in those of 'change2lineage_probability'.
+        Verifies that mutations in table 'change2lineage_probability' are contained in 'change2probability'.
+        Warns if exist any mutations of table 'lc_df' that is not characteristic to any lineage. 
+        """
+        self.formal_check_lc_df()
+        self.formal_check_change2lineage_probability()
+        self.formal_check_change2probability()
+        self.check_consistency_of_variants()
+        self.check_consistency_of_probabilities()
+
+    def formal_check_lc_df(self):
+        """
+        Check that table 'lc_df' contains a column 'lc_pos' of type 'int64' and that all preceeding columns are of type 'bool'. No other columns are contained in the table. 
+        Check that all vaules are defined (not null).
+        Issue a warning if not all mutations in table 'lc_df' are characteristic of at least one variant. 
+        """
+        # columns lc_pos existing and with correct type
+        assert 'lc_pos' in self.lc_df.columns, "Column 'lc_pos' is missing from table 'lc_df'"
+        assert pd.api.types.is_integer_dtype(self.lc_df.lc_pos.dtype) or np.issubdtype(self.lc_df.lc_pos.dtype, np.integer), "Column 'lc_pos' in table 'lc_df' is not of integer type"
+        # No Null values
+        assert not self.lc_df.isna().stack().any(), "Table 'lc_df' must not contain null values."
+        # contains columns other than lc_pos
+        assert self.lc_df.shape[1] > 1, "Table 'lc_df' should contain one column named 'lc_pos' and other additonal columns for the variants"
+        # no columns after lc_pos
+        assert self.lc_df.columns[-1] == 'lc_pos', "Table 'lc_df' should not contain other columns after the column 'lc_pos'"
+        # columns preceeding lc_pos are of type bool
+        lc_pos_col_index = self.lc_df.columns.get_indexer_for(['lc_pos'])[0]
+        preceeding_col_types = self.lc_df.dtypes[:lc_pos_col_index]
+        assert (preceeding_col_types == 'bool').all(), "Columns before 'lc_pos' in table 'lc_df' must be of type 'bool'."
+        assert len(preceeding_col_types) > 0, "Columns named as the variants should precede the column 'lc_pos' in table 'lc_df'."
+        # every mutation is characteristic to at least one lineage
+        mutations_not_used = self.lc_df.index[self.lc_df[self.lc_df.columns[:lc_pos_col_index]].sum(axis=1) == 0]
+        if len(mutations_not_used) > 0:
+            warnings.warn(f"{len(mutations_not_used)} / {self.lc_df.shape[0]} mutations listed in table 'lc_df' are not characteristic of any variant. To improve efficiency, it is recommended to remove unused mutations from the table index.")
+
+    def formal_check_change2lineage_probability(self):
+        """
+        Check that table 'change2lienage_probability' contains a column 'pos' of type 'int64' and that all preceeding columns are of type 'float64'. No other columns are contained in the table. 
+        Check that all vaules are defined (not null).
+        Check that probabilities are defined between 0 and 1. 
+        """
+        # columns pos existing and with correct type
+        assert 'pos' in self.c2lp_df.columns, "Column 'pos' is missing from table 'change2lineage_probability'"
+        assert pd.api.types.is_integer_dtype(self.c2lp_df.pos.dtype) or np.issubdtype(self.c2lp_df.pos.dtype, np.integer), "Column 'pos' in table 'change2lineage_probability' is not of intger type"
+        # No Null values
+        assert not self.c2lp_df.isna().stack().any(), "Table 'change2lineage_probability' must not contain null values."
+        # contains columns other than pos
+        assert self.c2lp_df.shape[1] > 1, "Table 'change2lineage_probability' should contain one column named 'pos' and other additonal columns for the variants"
+        # no columns after pos
+        assert self.c2lp_df.columns[-1] == 'pos', "Table 'change2lineage_probability' should not contain other columns after the column 'pos'."
+        # columns preceeding pos are of type float64
+        pos_col_index = self.c2lp_df.columns.get_indexer_for(['pos'])[0]
+        preceeding_col_types = self.c2lp_df.dtypes[:pos_col_index]
+        assert all([pd.api.types.is_float_dtype(col_dtype) or np.issubdtype(col_dtype, np.floating) for col_dtype in preceeding_col_types]), "Columns before 'pos' in table 'change2lineage_probability' must be of type float."
+        assert len(preceeding_col_types) > 0, "Columns named as the variants should precede the column 'pos' in table 'change2lineage_probability'."
+        # probability values are between 0 and 1
+        assert self.c2lp_df[self.c2lp_df.columns[:pos_col_index]].stack().between(0, 1, inclusive='both').all(), "Table 'change2lineage_probability' contains invalid probability values (not enclosed between 0 and 1)."
+         
+    def formal_check_change2probability(self):
+        """
+        Check that table 'change2probability' contains exactly two columns: 'probability' and 'pos' of type float64 and int64 respectively.
+        Check that all vaules are defined (not null).
+        Check that probabilities are defined between 0 and 1. 
+        """
+        # columns pos existing and with correct type
+        assert 'pos' in self.cp_df.columns, "Column 'pos' is missing from table 'change_probability'"
+        assert pd.api.types.is_integer_dtype(self.cp_df.pos.dtype) or np.issubdtype(self.cp_df.pos.dtype, np.integer), "Column 'pos' in table 'change2_probability' is not of intger type"
+        # column probability exisits with correct dtype
+        assert 'probability' in self.cp_df.columns, "Column 'probability' is missing from table 'change_probability'"
+        assert pd.api.types.is_float_dtype(self.cp_df.probability.dtype) or np.issubdtype(self.cp_df.probability.dtype, np.floating), "Column 'pos' in table 'change_probability' is not of type float"
+        # no other columns
+        assert self.cp_df.shape[1] == 2, "Table 'change_probability' should not contain columns other than 'probability' and 'pos'"
+        # No Null values
+        assert not self.cp_df.isna().stack().any(), "Table 'change_probability' must not contain null values."
+        # probability values are between 0 and 1
+        assert self.cp_df.probability.between(0, 1, inclusive='both').all(), "Table 'change_probability' contains invalid probability values (not enclosed between 0 and 1)."
+
+    def check_consistency_of_variants(self):
+        """
+        Check that variants in tables 'lc_df' and 'change2lienage_probability' match exactly.
+        """
+        lc_variants = self.lc_df.columns[:-1]
+        c2lp_variants = self.c2lp_df.columns[:-1]
+        try:
+            pd.testing.assert_index_equal(lc_variants, c2lp_variants, check_order=True, check_names=False)
+        except AssertionError:
+            print("Names and order of variants must match in tables 'lc_df', 'change2lineage_probability'.")
+            raise
+
+    def check_consistency_of_probabilities(self):
+        """
+        Check that mutations in table 'lc_df' are defined also in tables 'change2lienage_probability' and 'change2probability'.
+        Check that mutations in table 'change2lienage_probability' are defined also in table 'change2probability'.
+        """
+        lc_df_mutations = set(self.lc_df.index)
+        c2lp_mutations = set(self.c2lp_df.index)
+        cp_mutations = set(self.cp_df.index)
+        assert lc_df_mutations.issubset(c2lp_mutations) and lc_df_mutations.issubset(cp_mutations), "Mutations in table 'lc_df' must be defined also in tables 'change2lineage_probability' and 'change_probability'."
+        assert c2lp_mutations.issubset(cp_mutations), "Mutations in table 'change2lineage_probability' must be defined also in table 'change_probability'."
+
 
 class PangoLineageHierarchy(CandidatesHierarchy):
     def __init__(self, alias_key_file_path, environment=None):
